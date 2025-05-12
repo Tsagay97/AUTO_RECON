@@ -3,16 +3,16 @@ import re
 
 import streamlit as st
 import pandas as pd
+from dotenv import load_dotenv
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from openai import OpenAI
-from dotenv import load_dotenv
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1) Load .env if present (but do NOT override real environment variables)
+# 1) Load local .env without overwriting real environment variables
 load_dotenv(override=False)
 
-# 2) Fetch API key from environment (local .env or Cloud secret)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# 2) Fetch API key: prefer real env-var, then Streamlit secret
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError(
         "OPENAI_API_KEY not found. "
