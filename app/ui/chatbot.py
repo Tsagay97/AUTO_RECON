@@ -1,31 +1,39 @@
+import os
+import re
+
 import streamlit as st
 import pandas as pd
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from openai import OpenAI
-import re
-import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# ──────────────────────────────────────────────────────────────────────────────
+# 1) Load .env if present (but do NOT override real environment variables)
+load_dotenv(override=False)
 
-# Initialize OpenAI client with the API key from .env
+# 2) Fetch API key from environment (local .env or Cloud secret)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY not found in .env file")
+    raise ValueError(
+        "OPENAI_API_KEY not found. "
+        "Locally, put it in a `.env` file; "
+        "in Streamlit Cloud, set it under Settings → Secrets."
+    )
+
+# 3) Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Function to clean LaTeX-like syntax from the response
+# ──────────────────────────────────────────────────────────────────────────────
 def clean_latex(text: str) -> str:
-    # Remove common LaTeX tags like \boxed{}, \text{}, etc.
+    """Remove simple LaTeX commands from responses."""
     text = re.sub(r'\\boxed\{(.*?)\}', r'\1', text, flags=re.DOTALL)
     text = re.sub(r'\\text\{(.*?)\}', r'\1', text, flags=re.DOTALL)
     text = re.sub(r'\\(?:[a-zA-Z]+)\{.*?\}', '', text, flags=re.DOTALL)
     text = re.sub(r'\\[\[\]\{\}]', '', text)
     return text.strip()
 
-# Wrapper class for OpenAI to match LangChain expectations
 class OpenAILLM:
+    """Wrapper to match LangChain’s LLM interface."""
     def __init__(self):
         self.client = client
 
@@ -33,20 +41,16 @@ class OpenAILLM:
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=1500,
                 temperature=0.7
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
-            return f"Error calling OpenAI API: {str(e)}"
+            return f"Error calling OpenAI API: {e}"
 
-# Initialize OpenAI LLM
 openai_llm = OpenAILLM()
 
-# Initialize LangChain Pandas Agent with a single DataFrame
 def create_data_agent(df: pd.DataFrame):
     return create_pandas_dataframe_agent(
         llm=openai_llm,
@@ -55,30 +59,23 @@ def create_data_agent(df: pd.DataFrame):
         allow_dangerous_code=True
     )
 
-# Query routing logic
 def route_query(query: str) -> str:
-    query_lower = query.lower()
-    
-    # Keywords for FAQ-related queries
-    faq_keywords = [
-        "how do i use", "what file types", "what happens after", "exact matching", "fuzzy matching",
-        "result categories", "what can i ask", "how is this different", "my pdf isn’t uploading",
-        "can i export"
+    q = query.lower()
+    faq_keys = [
+        "how do i use", "what file types", "what happens after", "exact matching",
+        "fuzzy matching", "result categories", "what can i ask", "how is this different",
+        "my pdf isn’t uploading", "can i export"
     ]
-    is_faq_query = any(keyword in query_lower for keyword in faq_keywords)
-    
-    # Keywords for data-related queries
-    data_keywords = ["matched", "unmatched", "ricbl", "bob", "policy", "amount", "entries", "records", "verified matches"]
-    is_data_query = any(keyword in query_lower for keyword in data_keywords)
-    
-    if is_faq_query and not is_data_query:
-        return "faq"
-    elif is_data_query:
+    data_keys = [
+        "matched", "unmatched", "ricbl", "bob", "policy", "amount",
+        "entries", "records", "verified matches"
+    ]
+    if any(k in q for k in data_keys):
         return "data"
-    else:
-        return "general"
+    if any(k in q for k in faq_keys):
+        return "faq"
+    return "general"
 
-# FAQ dictionary
 FAQ_CONTENT = {
     "how do i use this system": (
         "To use the AI Reconciliation System:\n"
@@ -133,104 +130,62 @@ FAQ_CONTENT = {
     )
 }
 
-# Determine which FAQ to return based on query
 def handle_faq_query(query: str) -> str:
-    query_lower = query.lower()
-    # Find the best matching FAQ
-    for faq_question, faq_answer in FAQ_CONTENT.items():
-        if faq_question in query_lower:
-            return faq_answer
-    # Fallback if no exact match
+    q = query.lower()
+    for question, answer in FAQ_CONTENT.items():
+        if question in q:
+            return answer
     return (
         "I’m not sure how to answer that. Here’s a general guide to get you started:\n"
-        "To use the AI Reconciliation System:\n"
-        "1. Start by uploading your BOB and RICBL PDF statements using the sidebar.\n"
-        "2. The system will display raw data from both files.\n"
-        "3. Click on 'Cleaned Data' to see the cleaned, structured version of your data.\n"
-        "4. Then, go to 'Exact Matching' and select the columns you want to match.\n"
-        "5. Click 'Start Matching' to perform the reconciliation.\n"
-        "6. You’ll see a summary of matched, unmatched, and flagged transactions.\n"
-        "You can also ask specific questions like 'What is fuzzy matching?' or 'How many unmatched BOB entries?'"
+        + FAQ_CONTENT.get("how do i use this system", "")
     )
 
-# Determine which DataFrame to use based on the query
 def select_dataframe(query: str) -> pd.DataFrame:
-    query_lower = query.lower()
-    if "matched" in query_lower or "verified matches" in query_lower:
+    q = query.lower()
+    if "matched" in q or "verified matches" in q:
         return st.session_state.matched_df, "matched_df"
-    elif "unmatched" in query_lower and "bob" in query_lower:
+    if "unmatched" in q and "bob" in q:
         return st.session_state.unmatched_bob_df, "unmatched_bob_df"
-    elif "unmatched" in query_lower and "ricbl" in query_lower:
+    if "unmatched" in q and "ricbl" in q:
         return st.session_state.unmatched_ricb_df, "unmatched_ricb_df"
-    elif "bob" in query_lower:
+    if "bob" in q:
         return st.session_state.unmatched_bob_df, "unmatched_bob_df"
-    elif "ricbl" in query_lower:
+    if "ricbl" in q:
         return st.session_state.unmatched_ricb_df, "unmatched_ricb_df"
-    else:
-        # Default to matched_df if no specific DataFrame is identified
-        return st.session_state.matched_df, "matched_df"
+    return st.session_state.matched_df, "matched_df"
 
-# Handle data-related queries using LangChain Pandas Agent
 def handle_data_query(query: str) -> str:
-    # Check if DataFrames exist in session state
-    if ("matched_df" not in st.session_state or
-        "unmatched_bob_df" not in st.session_state or
-        "unmatched_ricb_df" not in st.session_state):
-        return "No data available. Please upload files and start matching to generate data."
-    
+    if not all(k in st.session_state for k in ["matched_df", "unmatched_bob_df", "unmatched_ricb_df"]):
+        return "No data available. Please upload files and start matching first."
+    q = query.lower()
+    if "first 5" in q and "matched" in q:
+        df = st.session_state.matched_df
+        return df.head(5).to_string() if not df.empty else "No matched records."
+    if "how many" in q and "verified matches" in q:
+        return str(len(st.session_state.matched_df))
+    if "show me all" in q or "show all" in q:
+        df, _ = select_dataframe(query)
+        return df.to_string()
+    df, _ = select_dataframe(query)
+    agent = create_data_agent(df)
     try:
-        query_lower = query.lower()
-        # Direct handling for "Give me the first 5 matched records" query
-        if "first 5" in query_lower and "matched" in query_lower:
-            matched_df = st.session_state.matched_df
-            if len(matched_df) == 0:
-                return "No matched records found."
-            return matched_df.head(5).to_string()
-        
-        # Direct handling for "How many total verified matches" query
-        if "how many" in query_lower and "verified matches" in query_lower:
-            return str(len(st.session_state.matched_df))
-        
-        # Fallback for simple "show me all" queries
-        if "show me all" in query_lower or "show all" in query_lower:
-            df, df_name = select_dataframe(query)
-            if "unmatched" in query_lower and "ricbl" in query_lower:
-                return st.session_state.unmatched_ricb_df.to_string()
-            elif "unmatched" in query_lower and "bob" in query_lower:
-                return st.session_state.unmatched_bob_df.to_string()
-            elif "matched" in query_lower or "verified matches" in query_lower:
-                return st.session_state.matched_df.to_string()
-        
-        # Use LangChain Pandas Agent for other queries
-        df, df_name = select_dataframe(query)
-        agent = create_data_agent(df)
         response = agent.run(query)
-        
-        # If the response is a DataFrame, convert it to a string for display
-        if isinstance(response, pd.DataFrame):
-            return response.to_string()
-        return str(response)
+        return response.to_string() if isinstance(response, pd.DataFrame) else str(response)
     except Exception as e:
-        return f"Error processing data query: {str(e)}"
+        return f"Error processing data query: {e}"
 
-# Handle general queries using OpenAI API
 def handle_general_query(query: str) -> str:
-    try:
-        prompt = f"Answer the following question in a concise and informative way, using plain text without any LaTeX or special formatting:\n{query}"
-        response = openai_llm(prompt)
-        # Clean the response to remove LaTeX (as a fallback)
-        cleaned_response = clean_latex(response)
-        return cleaned_response.strip()
-    except Exception as e:
-        return f"Error processing general query: {str(e)}"
+    prompt = (
+        "Answer the following question in a concise, plain‐text way (no LaTeX):\n"
+        + query
+    )
+    resp = openai_llm(prompt)
+    return clean_latex(resp)
 
-# Main chatbot function
 def process_query(query: str) -> str:
-    query_type = route_query(query)
-    
-    if query_type == "faq":
+    t = route_query(query)
+    if t == "faq":
         return handle_faq_query(query)
-    elif query_type == "data":
+    if t == "data":
         return handle_data_query(query)
-    else:
-        return handle_general_query(query)
+    return handle_general_query(query)
