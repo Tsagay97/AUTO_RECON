@@ -1,0 +1,47 @@
+/* Existing styles */
+.stat-card {
+  padding: 1rem;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+.stat-card.blue {
+  background: #e3f2fd;
+}
+.stat-card.orange {
+  background: #fff3e0;
+}
+.stat-card.green {
+  background: #e8f5e9;
+}
+.stat-card.red {
+  background: #ffebee;
+}
+
+/* Chat messages */
+.chat-message {
+  padding: 8px 12px;
+  border-radius: 10px;
+  margin: 5px 0;
+  max-width: 90%; /* Adjusted for sidebar width */
+}
+
+.chat-message.user {
+  background: #007bff;
+  color: white;
+  margin-left: auto;
+  text-align: right;
+}
+
+.chat-message.assistant {
+  background: #e0e0e0;
+  color: black;
+  margin-right: auto;
+  text-align: left;
+}
+
+/* Ensure the chat container is scrollable within the expander */
+div[data-testid="stVerticalBlock"] > div:has(.chat-message) {
+  overflow-y: auto;
+  flex-grow: 1;
+}
