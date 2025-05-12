@@ -14,9 +14,12 @@ load_dotenv(override=False)
 # 2) Fetch API key: prefer real env-var, then Streamlit secret
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    st.error("⚠️ OPENAI_API_KEY not found in environment or secrets.")
-    st.stop()
-    
+    raise ValueError(
+        "OPENAI_API_KEY not found. "
+        "Locally, put it in a `.env` file; "
+        "in Streamlit Cloud, set it under Settings → Secrets."
+    )
+
 # 3) Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
 
